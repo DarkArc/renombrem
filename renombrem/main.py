@@ -35,10 +35,22 @@ def parse_args():
     help = 'regex specifying what characters should be ignored'
   )
   parser.add_argument(
+    '--dashify-char-regex',
+    dest = 'dashify_regex',
+    default = r'\\/',
+    help = 'regex specifying what characters should be converted to dashes'
+  )
+  parser.add_argument(
     '--verbose',
     dest = 'verbose',
     action = 'store_true',
     help = 'enable verbose mode'
+  )
+  parser.add_argument(
+    '--dry-run',
+    dest = 'dry_run',
+    action = 'store_true',
+    help = 'do a dry run'
   )
 
   return parser.parse_args()
@@ -72,8 +84,10 @@ def get_track_name(track_data):
     return None
   return f"{number} - {title}"
 
-def pathify(skip_regex, name):
-  return skip_regex.sub('', name)
+def pathify(regex_bundle, name):
+  name = regex_bundle['dashify'].sub('-', name)
+  name = regex_bundle['skip'].sub('', name)
+  return name
 
 def _print_confused(cwd, path, artist, album, track_name):
   path_cleaned = str(path).replace(f"{cwd}{os.sep}", '')
@@ -104,7 +118,10 @@ SUPPORTED_FILE_TYPES = {
 
 def main():
   args = parse_args()
-  skip_regex = re.compile(f"[{args.skip_regex}]")
+  regex_bundle = {
+    'skip': re.compile(f"[{args.skip_regex}]"),
+    'dashify': re.compile(f"[{args.dashify_regex}]")
+  }
   cwd = os.getcwd()
 
   pending_renames = []
@@ -130,9 +147,9 @@ def main():
           continue
 
         # Convert to path friendly versions
-        artist = pathify(skip_regex, artist)
-        album = pathify(skip_regex, album)
-        track_name = pathify(skip_regex, track_name)
+        artist = pathify(regex_bundle, artist)
+        album = pathify(regex_bundle, album)
+        track_name = pathify(regex_bundle, track_name)
 
         target_path = Path(
           cwd,
@@ -151,27 +168,35 @@ def main():
         if track != None:
           track.close()
 
-  for from_path, to_path in pending_renames:
-    if args.verbose:
+  if args.verbose:
+    for from_path, to_path in pending_renames:
       _print_move(cwd, from_path, to_path)
 
-    parent_dir = to_path.parent
-    os.makedirs(parent_dir, exist_ok = True)
-    if os.path.exists(to_path):
-      _print_overwrite_move(cwd, to_path)
-      continue
+  if not args.dry_run:
+    user_response = input(
+      f"{len(pending_renames)} files will be removed. Continue [y/N]: "
+    ).lower()
+    if user_response != 'y':
+      exit(0)
 
-    shutil.move(from_path, to_path)
+    for from_path, to_path in pending_renames:
+      parent_dir = to_path.parent
+      os.makedirs(parent_dir, exist_ok = True)
+      if os.path.exists(to_path):
+        _print_overwrite_move(cwd, to_path)
+        continue
 
-  changes = True
-  while changes:
-    dirs_to_remove = []
-    for root, dirs, filenames in os.walk(cwd):
-      if len(dirs) == 0 and len(filenames) == 0:
-        dirs_to_remove.append(root)
+      shutil.move(from_path, to_path)
 
-    changes = len(dirs_to_remove) > 0
-    for dir in dirs_to_remove:
-      if args.verbose:
-        _print_delete(cwd, dir)
-      os.rmdir(dir)
+    changes = True
+    while changes:
+      dirs_to_remove = []
+      for root, dirs, filenames in os.walk(cwd):
+        if len(dirs) == 0 and len(filenames) == 0:
+          dirs_to_remove.append(root)
+
+      changes = len(dirs_to_remove) > 0
+      for dir in dirs_to_remove:
+        if args.verbose:
+          _print_delete(cwd, dir)
+        os.rmdir(dir)
