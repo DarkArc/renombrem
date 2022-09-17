@@ -29,18 +29,6 @@ def parse_args():
     description = 'Rearrange music based on file metadata.'
   )
   parser.add_argument(
-    '--skip-char-regex',
-    dest = 'skip_regex',
-    default = r':',
-    help = 'regex specifying what characters should be ignored'
-  )
-  parser.add_argument(
-    '--dashify-char-regex',
-    dest = 'dashify_regex',
-    default = r'\\/',
-    help = 'regex specifying what characters should be converted to dashes'
-  )
-  parser.add_argument(
     '--verbose',
     dest = 'verbose',
     action = 'store_true',
@@ -93,10 +81,34 @@ def get_track_name(track_data):
   result.append(title)
   return ' - '.join(result)
 
-def pathify(regex_bundle, name):
-  name = regex_bundle['dashify'].sub('-', name)
-  name = regex_bundle['skip'].sub('', name)
-  return name
+SIMPLE_PATH_REGEX = re.compile(r'^[A-Za-z0-9-_ ]+$')
+
+CHAR_REMAPPING = {
+  # ->
+  ':': '',
+  '?': '',
+  '\'': '',
+  '"': '',
+  '#': '',
+  # -> -
+  '\\': '-',
+  '/': '-',
+  '*': '-',
+  # -> o
+  '\u00F8': 'o'
+}
+
+def pathify(name):
+  if SIMPLE_PATH_REGEX.match(name):
+    return name
+
+  chars = []
+  for char in name:
+    if char in CHAR_REMAPPING:
+      chars.append(CHAR_REMAPPING[char])
+    else:
+      chars.append(char)
+  return ''.join(chars)
 
 def _print_confused(cwd, path, artist, album, track_name):
   path_cleaned = str(path).replace(f"{cwd}{os.sep}", '')
@@ -127,10 +139,6 @@ SUPPORTED_FILE_TYPES = {
 
 def main():
   args = parse_args()
-  regex_bundle = {
-    'skip': re.compile(f"[{args.skip_regex}]"),
-    'dashify': re.compile(f"[{args.dashify_regex}]")
-  }
   cwd = os.getcwd()
 
   pending_renames = []
@@ -156,9 +164,9 @@ def main():
           continue
 
         # Convert to path friendly versions
-        artist = pathify(regex_bundle, artist)
-        album = pathify(regex_bundle, album)
-        track_name = pathify(regex_bundle, track_name)
+        artist = pathify(artist)
+        album = pathify(album)
+        track_name = pathify(track_name)
 
         target_path = Path(
           cwd,
@@ -183,7 +191,7 @@ def main():
 
   if not args.dry_run:
     user_response = input(
-      f"{len(pending_renames)} files will be removed. Continue [y/N]: "
+      f"{len(pending_renames)} files will be moved. Continue [y/N]: "
     ).lower()
     if user_response != 'y':
       exit(0)
