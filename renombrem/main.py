@@ -74,15 +74,24 @@ def get_track_artist(track_data):
   return album_artist
 
 def get_track_name(track_data):
-  number = get_track_detail(track_data, 'TRACKNUMBER')
-  if number == None:
-    return None
-  if '/' in number:
-    number = number.split('/')[0]
   title = get_track_detail(track_data, 'TITLE')
   if title == None:
     return None
-  return f"{number} - {title}"
+
+  disc_number = get_track_detail(track_data, 'DISCNUMBER')
+  if disc_number != None and '/' in disc_number:
+    disc_number = disc_number.split('/')[0]
+  track_number = get_track_detail(track_data, 'TRACKNUMBER')
+  if track_number != None and '/' in track_number:
+    track_number = track_number.split('/')[0]
+
+  result = []
+  if disc_number != None:
+    result.append(disc_number)
+  if track_number != None:
+    result.append(track_number)
+  result.append(title)
+  return ' - '.join(result)
 
 def pathify(regex_bundle, name):
   name = regex_bundle['dashify'].sub('-', name)
