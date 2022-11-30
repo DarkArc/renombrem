@@ -137,11 +137,70 @@ SUPPORTED_FILE_TYPES = {
   '.ogg'
 }
 
+class PathRenameSet:
+  def __init__(self, root_dir):
+    self._root_dir = Path(root_dir).resolve()
+    self._renames = []
+    self._conflicting_paths = {}
+    self._sensitive_path_set = set()
+    self._insensitive_path_map = {}
+
+  def _get_paths_to_check(self, path):
+    paths_to_check = []
+    while path != self._root_dir:
+      paths_to_check.append(path)
+      path = path.parent
+    return reversed(paths_to_check)
+
+  def _acknowledge_path(self, to_path, from_path = None):
+    if from_path == None:
+      from_path = to_path
+
+    for checked_path in self._get_paths_to_check(to_path):
+      path_str = str(checked_path).lower()
+
+      if path_str not in self._insensitive_path_map:
+        # If this path has not been seen before (in any case), simply add its
+        # "rename" (which could be an identity/noop) now.
+        self._insensitive_path_map[path_str] = (from_path, to_path)
+      elif checked_path not in self._sensitive_path_set:
+        # If this path has been seen before (in some case), but not this case,
+        # we've detected a case conflict.
+        if path_str not in self._conflicting_paths:
+          # Setup an array specify the conflict based on the initial detected
+          # "rename" (which could be an identity/noop).
+          initial_conflict = self._insensitive_path_map[path_str]
+          self._conflicting_paths[path_str] = [initial_conflict]
+        # Add the detected conflicting case (in practice, this array only ever
+        # contains two elements, the initial conflict, and this conflict).
+        self._conflicting_paths[path_str].append((from_path, to_path))
+        break
+
+      self._sensitive_path_set.add(checked_path)
+
+  def add_rename(self, from_path, to_path):
+    self._renames.append((from_path, to_path))
+    self._acknowledge_path(to_path, from_path)
+
+  def add_kept_path(self, path):
+    self._acknowledge_path(path)
+
+  def get_renames(self):
+    return self._renames
+
+  def has_conflicting_paths(self):
+    if self._conflicting_paths:
+      return True
+    return False
+
+  def get_conflicting_paths(self):
+    return self._conflicting_paths
+
 def main():
   args = parse_args()
   cwd = os.getcwd()
 
-  pending_renames = []
+  rename_info = PathRenameSet(cwd)
 
   for root, _, filenames in os.walk(cwd):
     for filename in filenames:
@@ -176,9 +235,10 @@ def main():
         ).resolve()
 
         if file_path == target_path:
+          rename_info.add_kept_path(file_path)
           continue
 
-        pending_renames.append((file_path, target_path))
+        rename_info.add_rename(file_path, target_path)
       except OSError:
         pass
       finally:
@@ -186,8 +246,20 @@ def main():
           track.close()
 
   if args.verbose:
-    for from_path, to_path in pending_renames:
+    for from_path, to_path in rename_info.get_renames():
       _print_move(cwd, from_path, to_path)
+
+  if rename_info.has_conflicting_paths():
+    print('Conflicting path (on case insensitive files) detected:')
+    conflicting_paths = rename_info.get_conflicting_paths()
+    for conflicting_path, conflicting_renames in conflicting_paths.items():
+      print(f" - {conflicting_path} conflicts on:")
+      for from_path, to_path in conflicting_renames:
+        if from_path == to_path:
+          print(f"   - {from_path}")
+        else:
+          print(f"   - {to_path} (was {from_path})")
+    exit(1)
 
   if not args.dry_run:
     user_response = input(
