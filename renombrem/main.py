@@ -159,7 +159,6 @@ class PathRenameSet:
 class PathRenameSetCalculator:
   def __init__(self, root_dir):
     self._root_dir = Path(root_dir).resolve()
-    self._queued_renames = []
     self._renames = []
     self._conflicting_paths = {}
     self._sensitive_path_set = set()
