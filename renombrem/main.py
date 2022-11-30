@@ -188,6 +188,9 @@ class PathRenameSet:
   def get_renames(self):
     return self._renames
 
+  def count(self):
+    return len(self._renames)
+
   def has_conflicting_paths(self):
     if self._conflicting_paths:
       return True
@@ -263,12 +266,12 @@ def main():
 
   if not args.dry_run:
     user_response = input(
-      f"{len(pending_renames)} files will be moved. Continue [y/N]: "
+      f"{rename_info.count()} files will be moved. Continue [y/N]: "
     ).lower()
     if user_response != 'y':
       exit(0)
 
-    for from_path, to_path in pending_renames:
+    for from_path, to_path in rename_info.get_renames():
       parent_dir = to_path.parent
       os.makedirs(parent_dir, exist_ok = True)
       if os.path.exists(to_path):
