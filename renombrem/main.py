@@ -250,7 +250,7 @@ def main():
       _print_move(cwd, from_path, to_path)
 
   if rename_info.has_conflicting_paths():
-    print('Conflicting path (on case insensitive files) detected:')
+    print('Conflicting path (on case-insensitive file systems) detected:')
     conflicting_paths = rename_info.get_conflicting_paths()
     for conflicting_path, conflicting_renames in conflicting_paths.items():
       print(f" - {conflicting_path} conflicts on:")
