@@ -138,8 +138,28 @@ SUPPORTED_FILE_TYPES = {
 }
 
 class PathRenameSet:
+  def __init__(self, renames, conflicting_paths):
+    self._renames = renames
+    self._conflicting_paths = conflicting_paths
+
+  def get_renames(self):
+    return self._renames
+
+  def count(self):
+    return len(self._renames)
+
+  def has_conflicting_paths(self):
+    if self._conflicting_paths:
+      return True
+    return False
+
+  def get_conflicting_paths(self):
+    return self._conflicting_paths
+
+class PathRenameSetCalculator:
   def __init__(self, root_dir):
     self._root_dir = Path(root_dir).resolve()
+    self._queued_renames = []
     self._renames = []
     self._conflicting_paths = {}
     self._sensitive_path_set = set()
@@ -159,51 +179,50 @@ class PathRenameSet:
     for checked_path in self._get_paths_to_check(to_path):
       path_str = str(checked_path).lower()
 
-      if path_str not in self._insensitive_path_map:
+      if path_str in self._insensitive_path_map:
+        if checked_path not in self._sensitive_path_set:
+          # If this path has been seen before (in some case), but not this case,
+          # we've detected a case conflict.
+          if path_str not in self._conflicting_paths:
+            # Setup an array specify the conflict based on the initial detected
+            # "rename" (which could be an identity/noop).
+            initial_conflict = self._insensitive_path_map[path_str]
+            self._conflicting_paths[path_str] = [initial_conflict]
+
+          # Add the detected conflicting case.
+          self._conflicting_paths[path_str].append((from_path, to_path))
+
+          # Stop continued looping to prevent diagnosing child paths, and
+          # to stop the sensitive path set from being updated.
+          break
+      else:
         # If this path has not been seen before (in any case), simply add its
         # "rename" (which could be an identity/noop) now.
         self._insensitive_path_map[path_str] = (from_path, to_path)
-      elif checked_path not in self._sensitive_path_set:
-        # If this path has been seen before (in some case), but not this case,
-        # we've detected a case conflict.
-        if path_str not in self._conflicting_paths:
-          # Setup an array specify the conflict based on the initial detected
-          # "rename" (which could be an identity/noop).
-          initial_conflict = self._insensitive_path_map[path_str]
-          self._conflicting_paths[path_str] = [initial_conflict]
-        # Add the detected conflicting case (in practice, this array only ever
-        # contains two elements, the initial conflict, and this conflict).
-        self._conflicting_paths[path_str].append((from_path, to_path))
-        break
 
+      # Note this is not updated when there is a conflict detected. This allows
+      # files with conflicting paths to be added to the set of conflicts on a
+      # particular directory.
       self._sensitive_path_set.add(checked_path)
 
   def add_rename(self, from_path, to_path):
     self._renames.append((from_path, to_path))
-    self._acknowledge_path(to_path, from_path)
 
   def add_kept_path(self, path):
     self._acknowledge_path(path)
 
-  def get_renames(self):
-    return self._renames
-
-  def count(self):
-    return len(self._renames)
-
-  def has_conflicting_paths(self):
-    if self._conflicting_paths:
-      return True
-    return False
-
-  def get_conflicting_paths(self):
-    return self._conflicting_paths
+  def finish(self):
+    # Delay acknowledgment of renamed paths so that conflict detection reports
+    # all "new" files that introduce a conflict on a given directory.
+    for from_path, to_path in self._renames:
+      self._acknowledge_path(to_path, from_path)
+    return PathRenameSet(self._renames, self._conflicting_paths)
 
 def main():
   args = parse_args()
   cwd = os.getcwd()
 
-  rename_info = PathRenameSet(cwd)
+  rename_info_calc = PathRenameSetCalculator(cwd)
 
   for root, _, filenames in os.walk(cwd):
     for filename in filenames:
@@ -238,15 +257,17 @@ def main():
         ).resolve()
 
         if file_path == target_path:
-          rename_info.add_kept_path(file_path)
+          rename_info_calc.add_kept_path(file_path)
           continue
 
-        rename_info.add_rename(file_path, target_path)
+        rename_info_calc.add_rename(file_path, target_path)
       except OSError:
         pass
       finally:
         if track != None:
           track.close()
+
+  rename_info = rename_info_calc.finish()
 
   if args.verbose:
     for from_path, to_path in rename_info.get_renames():
