@@ -16,12 +16,15 @@
 # along with renombrem.  If not, see <https://www.gnu.org/licenses/>.
 
 import argparse
+import json
 import os
-import taglib
 import re
 import shutil
+import taglib
 import tempfile
+import traceback
 
+from datetime import datetime
 from pathlib import Path
 
 def parse_args():
@@ -217,16 +220,81 @@ class PathRenameSetCalculator:
       self._acknowledge_path(to_path, from_path)
     return PathRenameSet(self._renames, self._conflicting_paths)
 
+class FileCache:
+  def __init__(self, cache_path: Path) -> None:
+    self.directory = cache_path.parent
+    self.cache_path = cache_path
+
+    self._cache_state = {}
+    if self.cache_path.exists():
+      with open(self.cache_path, 'r') as file_handle:
+        raw_dict = json.load(file_handle)
+        for key, value in raw_dict.items():
+          self._cache_state[key] = datetime.fromisoformat(value)
+
+    self._checked_keys = set()
+
+  def _get_key(self, path: Path) -> str:
+    return str(path.relative_to(self.directory))
+
+  def _mark_checked(self, key: str) -> None:
+    self._checked_keys.add(key)
+
+  def _get_path_mod_time(self, path: Path) -> datetime:
+    if path.exists():
+      return datetime.fromtimestamp(path.stat().st_mtime)
+    else:
+      return datetime.now()
+
+  def has_changed(self, path: Path) -> bool:
+    key = self._get_key(path)
+    self._mark_checked(key)
+    if key in self._cache_state:
+      return self._get_path_mod_time(path) > self._cache_state[key]
+    return True
+
+  def mark_processed(self, path: Path) -> None:
+    key = self._get_key(path)
+    self._mark_checked(key)
+    self._cache_state[key] = self._get_path_mod_time(path)
+
+  def mark_moved(self, old_path: Path, new_path: Path) -> None:
+    # Invalidate the old key
+    old_key = self._get_key(new_path)
+    if old_key in self._cache_state:
+      del self._cache_state[old_key]
+    if old_key in self._checked_keys:
+      self._checked_keys.remove(old_key)
+
+    self.mark_processed(new_path)
+
+  def save(self) -> None:
+    rebuilt_cache = {}
+    for key in self._checked_keys:
+      if key in self._cache_state:
+        rebuilt_cache[key] = self._cache_state[key].isoformat()
+    with open(self.cache_path, 'w') as file_handle:
+      json.dump(rebuilt_cache, file_handle)
+    self._cache_state = rebuilt_cache
+
 def main():
   args = parse_args()
   cwd = os.getcwd()
 
   rename_info_calc = PathRenameSetCalculator(cwd)
 
+  file_cache_path = Path(cwd, '.renombrem')
+  file_cache = FileCache(file_cache_path)
+
   for root, _, filenames in os.walk(cwd):
     for filename in filenames:
       file_path = Path(root, filename).resolve()
       if file_path.suffix not in SUPPORTED_FILE_TYPES:
+        continue
+
+      if not file_cache.has_changed(file_path):
+        if args.verbose:
+          print(f"Skipping unchanged file: {file_path}")
         continue
 
       track = None
@@ -256,11 +324,15 @@ def main():
         ).resolve()
 
         if file_path == target_path:
+          file_cache.mark_processed(file_path)
           rename_info_calc.add_kept_path(file_path)
           continue
 
+        file_cache.mark_moved(file_path, target_path)
         rename_info_calc.add_rename(file_path, target_path)
       except OSError:
+        if args.verbose:
+          traceback.print_exc()
         pass
       finally:
         if track != None:
@@ -268,9 +340,8 @@ def main():
 
   rename_info = rename_info_calc.finish()
 
-  if args.verbose:
-    for from_path, to_path in rename_info.get_renames():
-      _print_move(cwd, from_path, to_path)
+  for from_path, to_path in rename_info.get_renames():
+    _print_move(cwd, from_path, to_path)
 
   if rename_info.has_conflicting_paths():
     print('Conflicting path (on case-insensitive file systems) detected:')
@@ -309,6 +380,7 @@ def main():
 
       changes = len(dirs_to_remove) > 0
       for dir in dirs_to_remove:
-        if args.verbose:
-          _print_delete(cwd, dir)
+        _print_delete(cwd, dir)
         os.rmdir(dir)
+
+    file_cache.save()
