@@ -295,6 +295,7 @@ def main():
       if not file_cache.has_changed(file_path):
         if args.verbose:
           print(f"Skipping unchanged file: {file_path}")
+        rename_info_calc.add_kept_path(file_path)
         continue
 
       track = None
