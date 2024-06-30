@@ -93,6 +93,7 @@ CHAR_REMAPPING = {
   '\'': '',
   '"': '',
   '#': '',
+  '|': '',
   # -> -
   '\\': '-',
   '/': '-',
@@ -111,7 +112,12 @@ def pathify(name):
       chars.append(CHAR_REMAPPING[char])
     else:
       chars.append(char)
-  return ''.join(chars).strip()
+  rebuilt_name = ''.join(chars)
+  # Remove surrounding whitespace
+  rebuilt_name = rebuilt_name.strip()
+  # Remove internal whitespace
+  rebuilt_name = re.sub(r'\s+', ' ', rebuilt_name)
+  return rebuilt_name
 
 def _print_confused(cwd, path, artist, album, track_name):
   path_cleaned = str(path).replace(f"{cwd}{os.sep}", '')
