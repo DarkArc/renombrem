@@ -43,6 +43,12 @@ def parse_args():
     action = 'store_true',
     help = 'do a dry run'
   )
+  parser.add_argument(
+    '--no-cache',
+    dest = 'no_cache',
+    action = 'store_true',
+    help = 'ignore the current cache state'
+  )
 
   return parser.parse_args()
 
@@ -290,6 +296,8 @@ def main():
   rename_info_calc = PathRenameSetCalculator(cwd)
 
   file_cache_path = Path(cwd, '.renombrem')
+  if args.no_cache and file_cache_path.exists():
+    file_cache_path.unlink()
   file_cache = FileCache(file_cache_path)
 
   for root, _, filenames in os.walk(cwd):
